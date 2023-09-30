@@ -1,17 +1,16 @@
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
+#include <ArduinoOTA.h>
 #include <FS.h>
 
-/////// MARK: - Setup
+/////// MARK: - Setup ///////
 // Constants
 #define LED_DATA_LENGTH 5
-
 #define AP_MODE 10001
 #define CLIENT_MODE 10002
-
 #define WIFI_RETRY_BEFORE_AP 10
-
-#define DEBUG_MODE
+#define HOSTNAME_SUFFIX "testDevice_"
+//#define DEBUG_MODE
 
 // LED strip pins
 #define LED_R_PIN D6
@@ -26,11 +25,6 @@ int wifiMode = AP_MODE;
 // WiFi credentials to connect to an AP
 String ssid = "";
 String password = "";
-const char *hostname = "controller";
-
-// Wifi credentials as AP
-const char *ssidAP = "testDevice_123";
-const char *passwordAP = "";
 
 // Set led status (R, G, B, CW, CC)
 int ledData[LED_DATA_LENGTH] = {0, 0, 0, 0, 0};
@@ -39,47 +33,54 @@ int ledData[LED_DATA_LENGTH] = {0, 0, 0, 0, 0};
 ESP8266WebServer server(80);
 
 // Static IP address configuration
-IPAddress staticIP(192, 168, 0, 126);
-IPAddress gateway(192, 168, 0, 1);
+IPAddress staticIP(192, 168, 10, 125);
+IPAddress gateway(192, 168, 10, 1);
 IPAddress subnet(255, 255, 255, 0);
 
+/// @brief Deletes settings file forcing a reset on credentials
 void deleteSettings()
 {
   SPIFFS.remove("/settings.txt");
 }
 
+/// @brief Reads settings from file to memory
+/// @return -1 if error and 0 if success
 int readSettings()
 {
   File file = SPIFFS.open("/settings.txt", "r");
-  if (!file) {
+  if (!file)
+  {
 
-    #ifdef DEBUG_MODE
+#ifdef DEBUG_MODE
     Serial.println("Failed to open file for reading");
     Serial.println("Defaulting to AP_MODE");
-    #endif
+#endif
     return -1;
   }
 
-  while (file.available()) {
+  while (file.available())
+  {
     String line = file.readStringUntil('\n');
     line.trim();
 
-    if (line.startsWith("SSID=")) {
+    if (line.startsWith("SSID="))
+    {
       ssid = line.substring(sizeof("SSID=") - 1);
-      #ifdef DEBUG_MODE
+#ifdef DEBUG_MODE
       Serial.println("SSID= " + ssid);
-      #endif
+#endif
     }
 
-    if (line.startsWith("Password=")) {
+    if (line.startsWith("Password="))
+    {
       password = line.substring(sizeof("Password=") - 1);
-      #ifdef DEBUG_MODE
+#ifdef DEBUG_MODE
       Serial.println("Password= " + password);
-      #endif
+#endif
     }
   }
 
-  if(ssid == "" || password == "")
+  if (ssid == "" || password == "")
   {
     return -1;
   }
@@ -105,7 +106,18 @@ void setupPins()
   analogWrite(LED_CC_PIN, 0);
 }
 
-/////// MARK: - Request Controllers
+String setupHostname()
+{
+  uint8_t mac[6];
+  WiFi.macAddress(mac);
+
+  String macAddress = HOSTNAME_SUFFIX;
+  for (int i = 2; i < 6; i++) {
+    macAddress += String(mac[i], 16);
+  }
+  return macAddress;
+}
+/////// MARK: - Request Controllers ///////
 
 /// @brief Handles RGB CW CC values
 void handleColorRequest()
@@ -145,6 +157,15 @@ void handleColorRequest()
   server.send(200);
 }
 
+/// @brief Handels factoryReset request
+void handleDelete()
+{
+  deleteSettings();
+  server.send(200);
+  ESP.restart();
+}
+
+/// @brief Handles connection request to a WiFi AP
 void connectToWifi()
 {
   if (wifiMode == AP_MODE)
@@ -166,7 +187,38 @@ void connectToWifi()
     file.println(_password);
     file.close();
 
-    server.send(200, "text/plain", "Rebooting now.");
+    String htmlPage = R"html(
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <style>
+          body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            background-color: #f2f2f2;
+            margin: 0;
+            padding: 0;
+          }
+          .container {
+            background-color: #fff;
+            border-radius: 10px;
+            box-shadow: 0 4px 8px 0 rgba(0, 0, 0, 0.2);
+            padding: 20px;
+            margin: 10% auto;
+            width: 80%;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <h2>Settings Saved</h2>
+          <p>Now rebooting the device. You can now connect to your WiFi network.</p>
+        </div>
+      </body>
+      </html>
+      )html";
+    server.send(200, "text/html", htmlPage);
+    delay(3000);
     ESP.restart();
   }
   else
@@ -186,13 +238,55 @@ void handleIndex()
   }
   else
   {
-    String html = "<html><body>";
-    html += "<h2>Login Form</h2>";
-    html += "<form action='/connect' method='POST'>";
-    html += "SSID: <input type='text' name='ssid'><br>";
-    html += "Password: <input type='password' name='password'><br>";
-    html += "<input type='submit' value='Submit'>";
-    html += "</form></body></html>";
+    String html = R"HTML(
+    <html>
+      <head>
+        <style>
+          body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            background-color: #f0f0f0;
+          }
+
+          h2 {
+            color: #333;
+          }
+
+          form {
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 5px;
+            display: inline-block;
+          }
+
+          input[type='text'], input[type='password'] {
+            width: 100%;
+            padding: 10px;
+            margin: 5px 0;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+          }
+
+          input[type='submit'] {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+          }
+        </style>
+      </head>
+      <body>
+        <h2>Login Form</h2>
+        <form action='/connect' method='POST'>
+          SSID: <input type='text' name='ssid'><br>
+          Password: <input type='password' name='password'><br>
+          <input type='submit' value='Submit'>
+        </form>
+      </body>
+    </html>
+    )HTML";
 
     server.send(200, "text/html", html);
   }
@@ -218,7 +312,7 @@ void getStatus()
   free(status);
 }
 
-/////// MARK: - Lifecycle Methods
+/////// MARK: - Lifecycle Methods ///////
 void setup()
 {
   /////// INITIAL SETUP ///////
@@ -238,22 +332,27 @@ void setup()
     wifiMode = AP_MODE;
   }
 
+  /////// READ SETTINGS TO MEMORY ///////
   if (readSettings() == -1)
   {
     Serial.println("No valid credentials found. mode is AP");
     wifiMode = AP_MODE;
-  } else
+  }
+  else
   {
     wifiMode = CLIENT_MODE;
   }
 
   /////// WIFI SETUP ///////
+  String hostname = setupHostname();
+  Serial.println(hostname);
+
   // Setup WiFi server
   if (wifiMode == CLIENT_MODE)
   {
     WiFi.mode(WIFI_STA);
-    WiFi.config(staticIP, gateway, subnet);
-    WiFi.hostname("Controller");
+    //WiFi.config(staticIP, gateway, subnet);
+    //WiFi.hostname("Controller");
     WiFi.setAutoConnect(true);
     WiFi.persistent(true);
 
@@ -279,7 +378,8 @@ void setup()
   else
   {
     WiFi.mode(WIFI_AP);
-    WiFi.softAP(ssidAP, passwordAP);
+    WiFi.softAPConfig(staticIP, gateway, subnet);
+    WiFi.softAP(hostname, "");
     Serial.println(WiFi.softAPIP());
   }
 
@@ -289,9 +389,17 @@ void setup()
   server.on("/connect", HTTP_POST, connectToWifi);
   server.on("/color", HTTP_GET, handleColorRequest);
   server.on("/status", HTTP_GET, getStatus);
+  server.on("/factoryReset", HTTP_GET, handleDelete);
 
   server.begin();
   Serial.println("Server started");
+
+
+  /////// Start OTA ///////
+  ArduinoOTA.setHostname(hostname.c_str());
+  Serial.println(ArduinoOTA.getHostname());
+  ArduinoOTA.begin(true);
+  Serial.println("ArduinoOTA has started");
 
   /////// OTHER SETUP ///////
   setupPins();
@@ -301,6 +409,7 @@ void setup()
 void loop()
 {
   server.handleClient();
+  ArduinoOTA.handle();
 
   if (WiFi.status() != WL_CONNECTED)
   {
