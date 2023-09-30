@@ -1,7 +1,8 @@
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
 #include <ArduinoOTA.h>
-#include <FS.h>
+#include <Models.h>
+#include <LittleFS.h>
 
 /////// MARK: - Setup ///////
 // Constants
@@ -26,7 +27,7 @@ int wifiMode = AP_MODE;
 String ssid = "";
 String password = "";
 
-// Set led status (R, G, B, CW, CC)
+// Set led status (R, B, G, CW, CC)
 int ledData[LED_DATA_LENGTH] = {0, 0, 0, 0, 0};
 
 // Define web server
@@ -40,14 +41,14 @@ IPAddress subnet(255, 255, 255, 0);
 /// @brief Deletes settings file forcing a reset on credentials
 void deleteSettings()
 {
-  SPIFFS.remove("/settings.txt");
+  LittleFS.remove("/settings.txt");
 }
 
 /// @brief Reads settings from file to memory
 /// @return -1 if error and 0 if success
 int readSettings()
 {
-  File file = SPIFFS.open("/settings.txt", "r");
+  File file = LittleFS.open("/settings.txt", "r");
   if (!file)
   {
 
@@ -112,49 +113,117 @@ String setupHostname()
   WiFi.macAddress(mac);
 
   String macAddress = HOSTNAME_SUFFIX;
-  for (int i = 2; i < 6; i++) {
+  for (int i = 3; i < 6; i++) {
     macAddress += String(mac[i], 16);
   }
   return macAddress;
 }
+
 /////// MARK: - Request Controllers ///////
 
 /// @brief Handles RGB CW CC values
 void handleColorRequest()
 {
-  int parametersCount = server.args();
-  for (int i = 0; i < parametersCount; i++)
-  {
-    // Validate argument string
-    String argName = server.argName(i);
-    String value = server.arg(i);
-
-    // Ignore unsopported params
-    if (value == NULL)
+    int parametersCount = server.args();
+    for (int i = 0; i < parametersCount; i++)
     {
-      continue;
+      // Validate argument string
+      String argName = server.argName(i);
+      String value = server.arg(i);
+
+      // Ignore unsopported params
+      if (value == NULL)
+      {
+        continue;
+      }
+
+      // Set value to int and check if it is within range (0 - 255)
+      // If out of range ignore value
+      int numericValue = value.toInt();
+
+      if (numericValue < 0 || numericValue > 255)
+      {
+        continue;
+      }
+
+      ledData[i] = numericValue;
     }
 
-    // Set value to int and check if it is within range (0 - 255)
-    // If out of range ignore value
-    int numericValue = value.toInt();
+    // Write led data to pins
+    analogWrite(LED_R_PIN, ledData[0]);
+    analogWrite(LED_B_PIN, ledData[1]);
+    analogWrite(LED_G_PIN, ledData[2]);
+    analogWrite(LED_CW_PIN, ledData[3]);
+    analogWrite(LED_CC_PIN, ledData[4]);
 
-    if (numericValue < 0 || numericValue > 255)
-    {
-      continue;
-    }
+    String htmlContent = "<!DOCTYPE html><html><head>";
+    htmlContent += "<meta name='viewport' content='width=device-width, initial-scale=1'>";
+    htmlContent += "<style>";
+    htmlContent += "body { font-family: Arial, sans-serif; text-align: center; }";
+    htmlContent += "h2 { color: #333; }";
+    htmlContent += ".container { margin: 0 auto; max-width: 300px; padding: 20px; border: 1px solid #ccc;";
+    htmlContent += "border-radius: 5px; background-color: #f9f9f9; }";
+    htmlContent += ".input-field { margin: 10px 0; padding: 5px; width: 100%; border: 1px solid #ccc;";
+    htmlContent += "border-radius: 3px; }";
+    htmlContent += "#send-button { background-color: #0074cc; color: #fff; padding: 10px 20px; border: none;";
+    htmlContent += "border-radius: 3px; cursor: pointer; }";
+    htmlContent += ".button-group { display: flex; flex-direction: column; align-items: center; }";
+    htmlContent += ".button-group button { margin: 5px 0; width: 100%; }"; 
+    htmlContent += "@media (max-width: 500px) {";
+    htmlContent += ".container { max-width: 100%; }";
+    htmlContent += ".input-field, .button-group button { width: 100%; }"; 
+    htmlContent += ".button-group button { height: 48px; }";
+    htmlContent += "}";
+    htmlContent += "</style>";
+    htmlContent += "<script>";
+    htmlContent += "function validateInput(inputField) {";
+    htmlContent += "   var value = parseInt(inputField.value, 10);";
+    htmlContent += "   if (isNaN(value) || value < 0 || value > 255) {";
+    htmlContent += "       alert('Please enter a valid value between 0 and 255.');";
+    htmlContent += "       inputField.value = '';";
+    htmlContent += "   }";
+    htmlContent += "}";
+    htmlContent += "function setToZeroAndSubmit() {";
+    htmlContent += "   document.getElementById('red').value = '0';";
+    htmlContent += "   document.getElementById('green').value = '0';";
+    htmlContent += "   document.getElementById('blue').value = '0';";
+    htmlContent += "   document.getElementById('cold-white').value = '0';";
+    htmlContent += "   document.getElementById('color-changing').value = '0';";
+    htmlContent += "}";
+    htmlContent += "function setSpecificAndSubmit() {";
+    htmlContent += "   document.getElementById('red').value = '10';";
+    htmlContent += "   document.getElementById('green').value = '0';";
+    htmlContent += "   document.getElementById('blue').value = '0';";
+    htmlContent += "   document.getElementById('cold-white').value = '255';";
+    htmlContent += "   document.getElementById('color-changing').value = '40';";
+    htmlContent += "}";
+    htmlContent += "</script>";
+    htmlContent += "</head><body>";
+    htmlContent += "<h2>LED Control</h2>";
+    htmlContent += "<div class='container'><form action='/color' method='get'>";
+    htmlContent += "<label for='red'>R:</label>";
+    htmlContent += "<input type='text' id='red' name='r' class='input-field' value='" + String(ledData[0]) + "' onblur='validateInput(this)'><br>";
 
-    ledData[i] = numericValue;
-  }
+    htmlContent += "<label for='green'>G:</label>";
+    htmlContent += "<input type='text' id='green' name='g' class='input-field' value='" + String(ledData[1]) + "' onblur='validateInput(this)'><br>";
 
-  // Write led data to pins
-  analogWrite(LED_R_PIN, ledData[0]);
-  analogWrite(LED_G_PIN, ledData[1]);
-  analogWrite(LED_B_PIN, ledData[2]);
-  analogWrite(LED_CW_PIN, ledData[3]);
-  analogWrite(LED_CC_PIN, ledData[4]);
+    htmlContent += "<label for='blue'>B:</label>";
+    htmlContent += "<input type='text' id='blue' name='b' class='input-field' value='" + String(ledData[2]) + "' onblur='validateInput(this)'><br>";
 
-  server.send(200);
+    htmlContent += "<label for='cold-white'>CW:</label>";
+    htmlContent += "<input type='text' id='cold-white' name='cw' class='input-field' value='" + String(ledData[3]) + "' onblur='validateInput(this)'><br>";
+
+    htmlContent += "<label for='color-changing'>CC:</label>";
+    htmlContent += "<input type='text' id='color-changing' name='cc' class='input-field' value='" + String(ledData[4]) + "' onblur='validateInput(this)'><br>";
+
+    htmlContent += "<div class='button-group'>";
+    htmlContent += "<button type='submit' id='send-button' onclick='setToZeroAndSubmit()'>Turn off</button>";
+    htmlContent += "<button type='submit' id='send-button' onclick='setSpecificAndSubmit()'>Set to default</button>";
+    htmlContent += "<button type='submit' id='send-button'>Send Request</button>";
+    htmlContent += "</div>";
+    htmlContent += "</form></div></body></html>";
+
+    server.send(200, "text/html", htmlContent);
 }
 
 /// @brief Handels factoryReset request
@@ -173,7 +242,7 @@ void connectToWifi()
     String _ssid = server.arg("ssid");
     String _password = server.arg("password");
 
-    File file = SPIFFS.open("/settings.txt", "w");
+    File file = LittleFS.open("/settings.txt", "w");
     if (!file)
     {
       Serial.println("Failed to open file for writing");
@@ -233,8 +302,37 @@ void handleIndex()
 {
   if (wifiMode == CLIENT_MODE)
   {
-    String description = "To set the LED strip color, send a HTTP GET request to this URL:\r\n/color?r=[0-255]&g=[0-255]&b=[0-255]&cw=[0-255]&cc=[0-255]\r\n";
-    server.send(200, "text/plain", description);
+    String htmlContent = "<!DOCTYPE html><html><head>";
+    // Add the viewport meta tag for mobile responsiveness
+    htmlContent += "<meta name='viewport' content='width=device-width, initial-scale=1'>";
+    htmlContent += "<style>";
+    // Your CSS styles go here
+
+    // CSS styles for common elements
+    htmlContent += "body { font-family: Arial, sans-serif; text-align: center; }";
+    htmlContent += ".container { max-width: 300px; margin: 0 auto; padding: 20px; border: 1px solid #ccc; border-radius: 5px; background-color: #f9f9f9; }";
+    htmlContent += ".button-group { display: flex; flex-direction: column; padding: 10px 20px; align-items: center; }";
+    htmlContent += ".button { background-color: #0074cc; color: #fff; padding: 10px 20px; border: none; border-radius: 3px; cursor: pointer; margin: 5px 0; width: 100%; text-decoration: none; font-size: 16px; }";
+
+    // Media query for smaller screens
+    htmlContent += "@media (max-width: 500px) {";
+    htmlContent += "    .container { max-width: 100%; }";
+    htmlContent += "    .button-group button { height: 48px; }";
+    htmlContent += "}";
+
+    // End of CSS styles
+
+    htmlContent += "</style>";
+    htmlContent += "</head><body>";
+    htmlContent += "<div class='container'>";
+    htmlContent += "<h2>Welcome to Cem's LED Controller WebUI</h2>";
+    htmlContent += "<div class='button-group'>";
+    htmlContent += "<a href='/color' class='button'>Color Control</a>";
+    htmlContent += "<a href='/factoryReset' class='button'>Factory Reset</a>";
+    htmlContent += "</div>";
+    htmlContent += "</div></body></html>";
+
+    server.send(200, "text/html", htmlContent);
   }
   else
   {
@@ -292,14 +390,19 @@ void handleIndex()
   }
 }
 
-/// @brief Sends back led status (rgb cc cw)
+/// @brief Sends back led status (rbg cc cw)
 void getStatus()
 {
+  /*
   char *status = (char *)malloc(sizeof(char));
   status[0] = '\0';
-
+  */
+  String status = "";
   for (int i = 0; i < LED_DATA_LENGTH; i++)
   {
+    Color colorLiteral = static_cast<Color>(i);
+    status += getColorString(colorLiteral) + ": " + String(ledData[i]) + " ";
+    /*
     // Allocate size for charArray + 1 for null pointer
     char *charArray = (char *)malloc(sizeof(ledData[i]) + 1);
     charArray[0] = '\0';
@@ -307,9 +410,10 @@ void getStatus()
     status = (char *)realloc(status, sizeof(charArray) * (i + 1));
     strcat(status, charArray);
     free(charArray);
+    */
   }
   server.send(200, "text/plain", status);
-  free(status);
+  //free(status);
 }
 
 /////// MARK: - Lifecycle Methods ///////
@@ -322,7 +426,7 @@ void setup()
   Serial.begin(74880);
 
   /////// MOUNT FILESYSTEM ///////
-  if (SPIFFS.begin())
+  if (LittleFS.begin())
   {
     Serial.println("File system mounting successful");
   }
@@ -352,7 +456,7 @@ void setup()
   {
     WiFi.mode(WIFI_STA);
     //WiFi.config(staticIP, gateway, subnet);
-    //WiFi.hostname("Controller");
+    WiFi.hostname(hostname);
     WiFi.setAutoConnect(true);
     WiFi.persistent(true);
 
@@ -395,7 +499,7 @@ void setup()
   Serial.println("Server started");
 
 
-  /////// Start OTA ///////
+  /////// START OTA ///////
   ArduinoOTA.setHostname(hostname.c_str());
   Serial.println(ArduinoOTA.getHostname());
   ArduinoOTA.begin(true);
