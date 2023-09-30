@@ -1,6 +1,7 @@
 #include <Models.h>
 
-String getColorString(Color color) {
+String getColorString(Color color)
+{
     switch (color) {
         case Color::R: return "R";
         case Color::G: return "G";
