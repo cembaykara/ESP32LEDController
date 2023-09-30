@@ -107,6 +107,8 @@ void setupPins()
   analogWrite(LED_CC_PIN, 0);
 }
 
+/// @brief Creates unique hostname/ssid out of mac address
+/// @return hostname string
 String setupHostname()
 {
   uint8_t mac[6];
@@ -120,7 +122,6 @@ String setupHostname()
 }
 
 /////// MARK: - Request Controllers ///////
-
 /// @brief Handles RGB CW CC values
 void handleColorRequest()
 {
