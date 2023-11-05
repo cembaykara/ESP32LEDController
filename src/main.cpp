@@ -252,7 +252,7 @@ void handleColorRequest() {
   analogWrite(LED_CW_PIN, ledData[3]);
   analogWrite(LED_CC_PIN, ledData[4]);
 
-  server.send(200, "text/html", htmlContent);
+  server.send(200);
 }
 
 /// @brief Handels factoryReset request
